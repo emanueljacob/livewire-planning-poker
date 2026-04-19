@@ -208,16 +208,26 @@ trait HandlesJiraImport
     {
         $this->jiraTickets = [];
 
+        /** @var array<string, true> $seenKeys */
+        $seenKeys = [];
+
         foreach ($issues as $issue) {
             $mapped = $jiraService->mapJiraIssueToArray($issue);
+            $key = (string) ($mapped['jira_key'] ?? '');
+
+            if ($key === '' || isset($seenKeys[$key])) {
+                continue;
+            }
+
+            $seenKeys[$key] = true;
 
             $alreadyImported = Issue::query()
-                ->where('jira_key', $mapped['jira_key'])
+                ->where('jira_key', $key)
                 ->where('session_id', $this->session->id)
                 ->exists();
 
             $this->jiraTickets[] = [
-                'key' => $mapped['jira_key'],
+                'key' => $key,
                 'title' => $mapped['title'],
                 'description' => $mapped['description'],
                 'url' => $mapped['jira_url'],
@@ -270,7 +280,7 @@ trait HandlesJiraImport
             ->max('position') ?? -1;
 
         foreach ($this->jiraTickets as &$ticket) {
-            if (!in_array($ticket['key'], $this->selectedJiraTickets)) {
+            if (!in_array($ticket['key'], $this->selectedJiraTickets, true)) {
                 continue;
             }
 
@@ -280,20 +290,31 @@ trait HandlesJiraImport
 
             $maxPosition++;
 
-            Issue::create([
-                'title' => $ticket['title'],
-                'description' => $ticket['description'],
-                'session_id' => $this->session->id,
-                'status' => IssueStatus::NEW,
-                'position' => $maxPosition,
-                'jira_key' => $ticket['key'],
-                'jira_url' => $ticket['url'],
-                'estimate_unit' => $ticket['estimate_unit'] ?? 'sp',
-                'issue_type' => $ticket['issue_type'] ?? null,
-            ]);
+            $issue = Issue::firstOrCreate(
+                [
+                    'session_id' => $this->session->id,
+                    'jira_key' => $ticket['key'],
+                ],
+                [
+                    'title' => $ticket['title'],
+                    'description' => $ticket['description'],
+                    'status' => IssueStatus::NEW,
+                    'position' => $maxPosition,
+                    'jira_url' => $ticket['url'],
+                    'estimate_unit' => $ticket['estimate_unit'] ?? 'sp',
+                    'issue_type' => $ticket['issue_type'] ?? null,
+                ],
+            );
+
+            if (!$issue->wasRecentlyCreated) {
+                $maxPosition--;
+            }
 
             $ticket['alreadyImported'] = true;
-            $importedCount++;
+
+            if ($issue->wasRecentlyCreated) {
+                $importedCount++;
+            }
         }
 
         $this->selectedJiraTickets = [];

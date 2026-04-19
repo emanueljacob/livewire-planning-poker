@@ -730,6 +730,35 @@ test('hasJiraCredentials returns false when credentials missing', function () {
     expect($result)->toBeFalse();
 });
 
+test('import selected jira tickets does not violate unique jira key per session', function () {
+    $session = createTestSession();
+    $owner = $session->owner;
+    $owner->update([
+        'jira_url' => 'https://jira.example.com',
+        'jira_user' => 'test@example.com',
+        'jira_api_key' => 'test-key',
+    ]);
+
+    $component = createSessionPageComponent($session, $owner);
+
+    $ticketRow = [
+        'key' => 'DUP-1',
+        'title' => 'Dup title',
+        'description' => null,
+        'url' => 'https://jira.example.com/browse/DUP-1',
+        'estimate_unit' => 'sp',
+        'issue_type' => null,
+        'alreadyImported' => false,
+    ];
+
+    $component->set('jiraTickets', [$ticketRow, $ticketRow]);
+    $component->set('selectedJiraTickets', ['DUP-1']);
+
+    $component->call('importSelectedJiraTickets');
+
+    expect(Issue::where('session_id', $session->id)->where('jira_key', 'DUP-1')->count())->toBe(1);
+});
+
 // ============================================================================
 // 7. INTEGRATION TESTS (User Flows)
 // ============================================================================
